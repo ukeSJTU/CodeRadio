@@ -9,9 +9,17 @@ import SwiftUI
 
 @main
 struct CodeRadioApp: App {
+    @State private var player = CodeRadioPlayer()
+
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        MenuBarExtra {
+            PlayerPopoverView(player: player)
+        } label: {
+            Label(
+                "Code Radio",
+                systemImage: player.isPlaying ? "waveform.circle.fill" : "radio"
+            )
         }
+        .menuBarExtraStyle(.window)
     }
 }
