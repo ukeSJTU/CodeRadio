@@ -89,24 +89,9 @@ xcodebuild test \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-## Project Structure
-
-```text
-CodeRadio/
-├── CodeRadioApp.swift
-├── CodeRadioModels.swift
-├── CodeRadioPlayer.swift
-├── LaunchAtLoginController.swift
-└── PlayerPopoverView.swift
-```
-
-- `CodeRadioApp` creates the shared models and menu bar scene.
-- `CodeRadioPlayer` owns streaming, metadata, preferences, and media controls.
-- `LaunchAtLoginController` manages the native macOS login item.
-- `PlayerPopoverView` renders the menu bar player.
-
-Development conventions and the full roadmap are documented in
-[AGENTS.md](AGENTS.md).
+Contributor conventions are documented in [AGENTS.md](AGENTS.md). Settled
+product behavior and release scope live in
+[docs/product-design.md](docs/product-design.md).
 
 ## Privacy
 
@@ -119,12 +104,8 @@ personal-data permissions.
 
 ## Roadmap
 
-- Improve buffering, retry, and offline-state handling.
-- Add a dedicated Settings window.
-- Add polished application and menu bar icons.
-- Add localization and broader automated test coverage.
-- Publish signed and notarized GitHub Releases.
-- Distribute through a Homebrew Cask.
+See [docs/product-design.md](docs/product-design.md) for the product roadmap and
+the boundary between the first public release and later work.
 
 ## Contributing
 
