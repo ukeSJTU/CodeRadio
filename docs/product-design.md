@@ -63,9 +63,10 @@ stop cancels recovery. Once automatic attempts are exhausted, requests stop and
 the popover presents the cause and a clear Retry action.
 
 The saved stream quality is a preference, not a recovery state. A failed preferred
-stream may temporarily fall back to the other quality without changing the saved
-choice. A new connection tries the preference first. Changing the preference
-while playing reconnects immediately; changing it while stopped only saves it.
+stream may temporarily fall back to the lower quality without changing the saved
+choice. Recovery remains on that lower quality until Stop, Retry, or an explicit
+quality change starts a new cycle. Changing the preference while playing
+reconnects immediately; changing it while stopped only saves it.
 
 Metadata and audio fail independently. When metadata is unavailable, playback may
 use a fixed fallback stream, the last known song remains visible as stale, and the

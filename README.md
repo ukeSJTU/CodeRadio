@@ -18,6 +18,11 @@ stream directly and does not wrap the website in a web view.
 - Uses native Liquid Glass controls on macOS 26 and a system-material fallback
   on macOS 14 and 15.
 - Switches between the official 128 kbps and 64 kbps MP3 streams.
+- Shows connecting, buffering, reconnecting, offline, and failed playback states.
+- Retries temporary playback failures with bounded backoff and offers a manual
+  **Retry** action when automatic recovery is exhausted.
+- May temporarily use the 64 kbps stream during recovery without changing a
+  saved 128 kbps preference.
 - Refreshes station metadata automatically.
 - Integrates with macOS media controls and Now Playing.
 - Optionally launches when you log in using the native macOS login-item API.
@@ -62,6 +67,11 @@ From the popover you can:
 - Refresh metadata or open the official Code Radio website from that menu.
 - Enable **Launch at Login** from that menu.
 - Quit the application.
+
+Stopping playback cancels pending recovery. If the network goes offline while
+playback is active, CodeRadio keeps the play request and resumes automatically
+after connectivity returns. The menu-bar icon and popover show the observed
+playback state rather than treating a Play click as immediate success.
 
 If macOS requires approval for Launch at Login, the ellipsis menu adds an
 **Approve in System Settings…** action that opens **System Settings → General →

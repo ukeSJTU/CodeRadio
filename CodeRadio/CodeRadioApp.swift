@@ -19,10 +19,12 @@ struct CodeRadioApp: App {
                 launchAtLogin: launchAtLogin
             )
         } label: {
+            let presentation = player.playbackPresentation
             Label(
-                "Code Radio",
-                systemImage: player.isPlaying ? "waveform.circle.fill" : "radio"
+                presentation.menuBarAccessibilityLabel,
+                systemImage: presentation.menuBarSystemImage
             )
+            .accessibilityLabel(presentation.menuBarAccessibilityLabel)
         }
         .menuBarExtraStyle(.window)
     }

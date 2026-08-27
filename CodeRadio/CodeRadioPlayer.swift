@@ -1,5 +1,4 @@
 import AppKit
-import AVFoundation
 import MediaPlayer
 import Observation
 import OSLog
@@ -13,17 +12,15 @@ final class CodeRadioPlayer {
 
     private static let websiteURL = URL(string: "https://coderadio.freecodecamp.org/")!
     private static let volumeKey = "CodeRadio.volume"
-    private static let qualityKey = "CodeRadio.quality"
 
-    var isPlaying = false
     var isRefreshing = false
-    var isOnline = true
+    var stationIsOnline = true
     var listenerCount = 0
     var currentSong: Song?
     var songHistory: [Song] = []
     var playedAt: Date?
     var songDuration: TimeInterval = 0
-    var errorMessage: String?
+    var metadataErrorMessage: String?
 
     var volume: Double {
         didSet {
@@ -32,40 +29,52 @@ final class CodeRadioPlayer {
                 volume = clampedVolume
                 return
             }
-            player.volume = Float(clampedVolume)
+            playback.setVolume(Float(clampedVolume))
             UserDefaults.standard.set(clampedVolume, forKey: Self.volumeKey)
         }
     }
 
     var selectedQuality: StreamQuality {
-        didSet {
-            UserDefaults.standard.set(selectedQuality.rawValue, forKey: Self.qualityKey)
-            if isPlaying {
-                play()
-            }
-        }
+        get { playback.snapshot.preferredQuality }
+        set { playback.setPreferredQuality(newValue) }
     }
 
-    @ObservationIgnored private let player = AVPlayer()
-    @ObservationIgnored private var mounts: [StreamMount] = []
+    var playbackPresentation: PlaybackPresentation {
+        PlaybackPresentation(snapshot: playback.snapshot)
+    }
+
+    @ObservationIgnored private let playback: PlaybackCoordinator
     @ObservationIgnored private var metadataTask: Task<Void, Never>?
-    @ObservationIgnored private var playbackFailureObserver: NSObjectProtocol?
     @ObservationIgnored private var remoteCommandTargets: [(MPRemoteCommand, Any)] = []
+    @ObservationIgnored private var announceRecoveryAfterRetry = false
+    @ObservationIgnored private var fallbackAnnouncementPending = false
     @ObservationIgnored private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "CodeRadio",
         category: "player"
     )
 
-    init() {
+    convenience init() {
+        let coordinator = PlaybackCoordinator(
+            engine: AVPlayerPlaybackEngine(),
+            scheduler: TaskPlaybackDeadlineScheduler(),
+            connectivity: NWPathConnectivitySource(),
+            sleepWake: WorkspaceSleepWakeSource(),
+            preferences: UserDefaultsPlaybackPreferences()
+        )
+        self.init(playback: coordinator)
+    }
+
+    init(playback: PlaybackCoordinator) {
+        self.playback = playback
         let savedVolume = UserDefaults.standard.object(forKey: Self.volumeKey) as? Double
         volume = savedVolume ?? 0.5
 
-        let savedQuality = UserDefaults.standard.string(forKey: Self.qualityKey)
-        selectedQuality = StreamQuality(rawValue: savedQuality ?? "") ?? .high
-
-        player.volume = Float(volume)
-        configurePlaybackFailureHandling()
+        playback.setVolume(Float(volume))
+        playback.snapshotDidChange = { [weak self] oldSnapshot, newSnapshot in
+            self?.playbackDidChange(from: oldSnapshot, to: newSnapshot)
+        }
         configureRemoteCommands()
+        updateSystemNowPlaying()
         startMetadataUpdates()
     }
 
@@ -74,33 +83,45 @@ final class CodeRadioPlayer {
         return min(max(Date().timeIntervalSince(playedAt) / songDuration, 0), 1)
     }
 
-    var selectedStreamLabel: String {
-        selectedQuality.label
-    }
-
-    func togglePlayback() {
-        isPlaying ? stop() : play()
-    }
-
     func play() {
-        errorMessage = nil
-        let item = AVPlayerItem(url: streamURL(for: selectedQuality))
-        player.replaceCurrentItem(with: item)
-        player.volume = Float(volume)
-        player.play()
-        isPlaying = true
-        updateSystemNowPlaying()
+        playback.play()
     }
 
     func stop() {
-        player.pause()
-        player.replaceCurrentItem(with: nil)
-        isPlaying = false
-        MPNowPlayingInfoCenter.default().playbackState = .stopped
+        announceRecoveryAfterRetry = false
+        fallbackAnnouncementPending = false
+        playback.stop()
+    }
+
+    func retry() {
+        announceRecoveryAfterRetry = true
+        playback.retry()
+    }
+
+    func togglePlayback() {
+        switch playback.snapshot.phase {
+        case .stopped:
+            play()
+        case .failed:
+            retry()
+        case .connecting, .playing, .reconnecting, .offline:
+            stop()
+        }
     }
 
     func openWebsite() {
         NSWorkspace.shared.open(Self.websiteURL)
+    }
+
+    func quit() {
+        metadataTask?.cancel()
+        metadataTask = nil
+        playback.shutdown()
+        for (command, target) in remoteCommandTargets {
+            command.removeTarget(target)
+        }
+        remoteCommandTargets.removeAll()
+        NSApplication.shared.terminate(nil)
     }
 
     func refreshMetadata() async {
@@ -121,19 +142,19 @@ final class CodeRadioPlayer {
             }
 
             let payload = try JSONDecoder.codeRadio.decode(CodeRadioResponse.self, from: data)
-            mounts = payload.station.mounts
-            isOnline = payload.isOnline
+            playback.updateMounts(payload.station.mounts)
+            stationIsOnline = payload.isOnline
             listenerCount = payload.listeners.current
             currentSong = payload.nowPlaying.song
             playedAt = Date(timeIntervalSince1970: payload.nowPlaying.playedAt)
             songDuration = payload.nowPlaying.duration
             songHistory = payload.songHistory.map(\.song)
-            errorMessage = nil
+            metadataErrorMessage = nil
             updateSystemNowPlaying()
         } catch {
             logger.error("Metadata refresh failed: \(error.localizedDescription, privacy: .public)")
             if currentSong == nil {
-                errorMessage = "Unable to load station information"
+                metadataErrorMessage = String(localized: "Unable to load station information")
             }
         }
     }
@@ -142,44 +163,71 @@ final class CodeRadioPlayer {
         metadataTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refreshMetadata()
-                try? await Task.sleep(for: .seconds(15))
+                do {
+                    try await Task.sleep(for: .seconds(15))
+                } catch {
+                    return
+                }
             }
         }
     }
 
-    private func streamURL(for quality: StreamQuality) -> URL {
-        let sortedMounts = mounts.sorted { $0.bitrate < $1.bitrate }
-        switch quality {
-        case .high:
-            return sortedMounts.last?.url ?? quality.fallbackURL
-        case .low:
-            return sortedMounts.first?.url ?? quality.fallbackURL
-        }
-    }
+    private func playbackDidChange(
+        from oldSnapshot: PlaybackSnapshot,
+        to newSnapshot: PlaybackSnapshot
+    ) {
+        logger.debug(
+            "Playback state changed to \(String(describing: newSnapshot.phase), privacy: .public)"
+        )
+        updateRemoteCommandAvailability()
+        updateSystemNowPlaying()
 
-    private func configurePlaybackFailureHandling() {
-        playbackFailureObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemFailedToPlayToEndTime,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            let underlyingError = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey]
-                as? Error
-            Task { @MainActor [weak self] in
-                self?.handlePlaybackFailure(underlyingError)
+        if !oldSnapshot.isUsingTemporaryFallback && newSnapshot.isUsingTemporaryFallback {
+            fallbackAnnouncementPending = true
+        } else if !newSnapshot.isUsingTemporaryFallback {
+            fallbackAnnouncementPending = false
+        }
+
+        if oldSnapshot.phase != newSnapshot.phase {
+            switch newSnapshot.phase {
+            case .offline:
+                postAccessibilityAnnouncement(
+                    String(localized: "No network connection. Playback will resume automatically.")
+                )
+            case .failed(let reason):
+                let message = PlaybackPresentation(snapshot: newSnapshot)
+                    .statusMessages
+                    .first { $0.showsRetry }?
+                    .message
+                    ?? String(localized: "Playback failed.")
+                logger.error(
+                    "Playback recovery exhausted: \(String(describing: reason), privacy: .public)"
+                )
+                postAccessibilityAnnouncement(message)
+            case .playing:
+                if fallbackAnnouncementPending {
+                    fallbackAnnouncementPending = false
+                    postAccessibilityAnnouncement(
+                        String(localized: "Playing at 64 kbps. Your 128 kbps preference is unchanged.")
+                    )
+                }
+                if announceRecoveryAfterRetry {
+                    announceRecoveryAfterRetry = false
+                    postAccessibilityAnnouncement(String(localized: "Playback restored."))
+                }
+            case .stopped, .connecting, .reconnecting:
+                break
             }
         }
     }
 
-    private func handlePlaybackFailure(_ error: Error?) {
-        logger.error("Playback failed: \(error?.localizedDescription ?? "Unknown error", privacy: .public)")
-        if selectedQuality == .high {
-            selectedQuality = .low
-            errorMessage = "128 kbps stream unavailable; switched to 64 kbps"
-        } else {
-            stop()
-            errorMessage = "The Code Radio stream is currently unavailable"
-        }
+    private func postAccessibilityAnnouncement(_ message: String) {
+        guard let app = NSApp else { return }
+        NSAccessibility.post(
+            element: app,
+            notification: .announcementRequested,
+            userInfo: [.announcement: message]
+        )
     }
 
     private func configureRemoteCommands() {
@@ -189,7 +237,14 @@ final class CodeRadioPlayer {
         commandCenter.changePlaybackPositionCommand.isEnabled = false
 
         let playTarget = commandCenter.playCommand.addTarget { [weak self] _ in
-            Task { @MainActor [weak self] in self?.play() }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if case .failed = self.playback.snapshot.phase {
+                    self.retry()
+                } else {
+                    self.play()
+                }
+            }
             return .success
         }
         remoteCommandTargets.append((commandCenter.playCommand, playTarget))
@@ -205,25 +260,54 @@ final class CodeRadioPlayer {
             return .success
         }
         remoteCommandTargets.append((commandCenter.togglePlayPauseCommand, toggleTarget))
+        updateRemoteCommandAvailability()
+    }
+
+    private func updateRemoteCommandAvailability() {
+        let commandCenter = MPRemoteCommandCenter.shared()
+        switch playback.snapshot.phase {
+        case .stopped, .failed:
+            commandCenter.playCommand.isEnabled = true
+            commandCenter.pauseCommand.isEnabled = playback.snapshot.intent == .playing
+        case .connecting, .playing, .reconnecting, .offline:
+            commandCenter.playCommand.isEnabled = false
+            commandCenter.pauseCommand.isEnabled = true
+        }
+        commandCenter.togglePlayPauseCommand.isEnabled = true
     }
 
     private func updateSystemNowPlaying() {
-        guard let currentSong else {
-            MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .stopped
-            return
+        let presentation = playbackPresentation
+        let playbackState: MPNowPlayingPlaybackState
+        switch presentation.systemState {
+        case .playing:
+            playbackState = .playing
+        case .interrupted:
+            playbackState = .interrupted
+        case .stopped:
+            playbackState = .stopped
         }
 
+        let center = MPNowPlayingInfoCenter.default()
+        center.playbackState = playbackState
+
+        guard let currentSong else { return }
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: currentSong.title,
             MPMediaItemPropertyArtist: currentSong.artist,
             MPNowPlayingInfoPropertyIsLiveStream: true,
-            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
+            MPNowPlayingInfoPropertyPlaybackRate: presentation.playbackRate,
         ]
         if !currentSong.album.isEmpty {
             info[MPMediaItemPropertyAlbumTitle] = currentSong.album
         }
+        center.nowPlayingInfo = info
+    }
 
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-        MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .stopped
+    deinit {
+        metadataTask?.cancel()
+        for (command, target) in remoteCommandTargets {
+            command.removeTarget(target)
+        }
     }
 }

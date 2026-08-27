@@ -1,6 +1,6 @@
 import Foundation
 
-enum StreamQuality: String, CaseIterable, Identifiable {
+enum StreamQuality: String, CaseIterable, Identifiable, Sendable {
     case high
     case low
 

@@ -5,6 +5,8 @@ struct PlayerPopoverView: View {
     @Bindable var player: CodeRadioPlayer
     @Bindable var launchAtLogin: LaunchAtLoginController
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var isHistoryExpanded = false
 
     private let popoverWidth: CGFloat = 320
@@ -16,7 +18,13 @@ struct PlayerPopoverView: View {
             recentSongsSection
         }
         .frame(width: popoverWidth)
-        .background(.regularMaterial)
+        .background {
+            if reduceTransparency {
+                Color(nsColor: .windowBackgroundColor)
+            } else {
+                Rectangle().fill(.regularMaterial)
+            }
+        }
         .overlay(alignment: .topTrailing) {
             settingsMenu
                 .padding(14)
@@ -40,8 +48,12 @@ struct PlayerPopoverView: View {
             controlsSection
                 .padding(.top, 14)
 
-            if let statusMessage {
-                statusBanner(statusMessage)
+            if !statusMessages.isEmpty {
+                VStack(spacing: 8) {
+                    ForEach(statusMessages) { message in
+                        statusBanner(message)
+                    }
+                }
                     .padding(.top, 12)
             }
         }
@@ -114,7 +126,7 @@ struct PlayerPopoverView: View {
     private var liveBadge: some View {
         let label = HStack(spacing: 5) {
             Circle()
-                .fill(player.isOnline ? .green : .red)
+                .fill(player.stationIsOnline ? .green : .red)
                 .frame(width: 6, height: 6)
 
             Text(liveBadgeText)
@@ -124,7 +136,13 @@ struct PlayerPopoverView: View {
         .padding(.horizontal, 10)
         .frame(height: 24)
 
-        if #available(macOS 26.0, *) {
+        if reduceTransparency {
+            label
+                .background(Color(nsColor: .windowBackgroundColor), in: Capsule())
+                .overlay {
+                    Capsule().strokeBorder(.separator, lineWidth: 0.5)
+                }
+        } else if #available(macOS 26.0, *) {
             label
                 .glassEffect(.regular, in: .capsule)
         } else {
@@ -138,7 +156,7 @@ struct PlayerPopoverView: View {
     }
 
     private var liveBadgeText: String {
-        guard player.isOnline else { return "Offline" }
+        guard player.stationIsOnline else { return "Offline" }
         guard player.listenerCount > 0 else { return "Live" }
         return "Live · \(player.listenerCount.formatted())"
     }
@@ -197,7 +215,14 @@ struct PlayerPopoverView: View {
 
     @ViewBuilder
     private var controlsIsland: some View {
-        if #available(macOS 26.0, *) {
+        if reduceTransparency {
+            controls
+                .padding(6)
+                .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
+                .overlay {
+                    Capsule().strokeBorder(.separator, lineWidth: 0.5)
+                }
+        } else if #available(macOS 26.0, *) {
             GlassEffectContainer(spacing: 8) {
                 controls
                     .padding(6)
@@ -219,7 +244,8 @@ struct PlayerPopoverView: View {
     }
 
     private var controls: some View {
-        HStack(spacing: 6) {
+        let presentation = player.playbackPresentation
+        return HStack(spacing: 6) {
             volumeButton(
                 systemImage: "minus",
                 label: "Decrease volume",
@@ -227,24 +253,30 @@ struct PlayerPopoverView: View {
             )
 
             Button {
-                player.togglePlayback()
+                switch presentation.primaryAction {
+                case .play:
+                    player.play()
+                case .stop:
+                    player.stop()
+                }
             } label: {
                 ZStack {
                     Circle()
                         .fill(.primary)
 
-                    Image(systemName: player.isPlaying ? "stop.fill" : "play.fill")
+                    Image(systemName: presentation.primarySystemImage)
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(Color(nsColor: .windowBackgroundColor))
-                        .offset(x: player.isPlaying ? 0 : 1)
+                        .offset(x: presentation.primaryAction == .play ? 1 : 0)
                 }
                 .frame(width: 48, height: 48)
                 .contentShape(.circle)
             }
             .buttonStyle(.plain)
             .keyboardShortcut(.space, modifiers: [])
-            .help(player.isPlaying ? "Stop" : "Play")
-            .accessibilityLabel(player.isPlaying ? "Stop Code Radio" : "Play Code Radio")
+            .help(presentation.primaryHelp)
+            .accessibilityLabel(presentation.primaryAccessibilityLabel)
+            .accessibilityIdentifier("playback-primary-action")
 
             volumeButton(
                 systemImage: "plus",
@@ -279,7 +311,7 @@ struct PlayerPopoverView: View {
             Divider()
 
             Button {
-                withAnimation(.snappy(duration: 0.24)) {
+                withAnimation(reduceMotion ? nil : .snappy(duration: 0.24)) {
                     isHistoryExpanded.toggle()
                 }
             } label: {
@@ -379,7 +411,7 @@ struct PlayerPopoverView: View {
             Divider()
 
             Button("Quit Code Radio") {
-                NSApplication.shared.terminate(nil)
+                player.quit()
             }
             .keyboardShortcut("q")
         } label: {
@@ -399,7 +431,13 @@ struct PlayerPopoverView: View {
             .frame(width: 30, height: 30)
             .contentShape(.circle)
 
-        if #available(macOS 26.0, *) {
+        if reduceTransparency {
+            label
+                .background(Color(nsColor: .controlBackgroundColor), in: Circle())
+                .overlay {
+                    Circle().strokeBorder(.separator, lineWidth: 0.5)
+                }
+        } else if #available(macOS 26.0, *) {
             label
                 .glassEffect(.regular.interactive(), in: .circle)
         } else {
@@ -419,31 +457,80 @@ struct PlayerPopoverView: View {
         )
     }
 
-    private var statusMessage: StatusMessage? {
-        if let error = player.errorMessage {
-            return StatusMessage(text: error, color: .orange)
-        }
-        if let error = launchAtLogin.errorMessage {
-            return StatusMessage(text: error, color: .red)
-        }
-        if launchAtLogin.requiresApproval {
-            return StatusMessage(
-                text: "Approve Launch at Login in System Settings",
-                color: .orange
+    private var statusMessages: [StatusMessage] {
+        var messages = player.playbackPresentation.statusMessages.map { presentation in
+            StatusMessage(
+                id: presentation.id,
+                text: presentation.message,
+                systemImage: presentation.systemImage,
+                color: color(for: presentation.tone),
+                showsRetry: presentation.showsRetry
             )
         }
-        return nil
+        if let error = player.metadataErrorMessage {
+            messages.append(StatusMessage(
+                id: "metadata-error",
+                text: error,
+                systemImage: "info.circle.fill",
+                color: .orange,
+                showsRetry: false
+            ))
+        }
+        if let error = launchAtLogin.errorMessage {
+            messages.append(StatusMessage(
+                id: "launch-at-login-error",
+                text: error,
+                systemImage: "exclamationmark.triangle.fill",
+                color: .red,
+                showsRetry: false
+            ))
+        }
+        if launchAtLogin.requiresApproval {
+            messages.append(StatusMessage(
+                id: "launch-at-login-approval",
+                text: "Approve Launch at Login in System Settings",
+                systemImage: "exclamationmark.triangle.fill",
+                color: .orange,
+                showsRetry: false
+            ))
+        }
+        return messages
     }
 
     private func statusBanner(_ message: StatusMessage) -> some View {
-        Label(message.text, systemImage: "exclamationmark.triangle.fill")
-            .font(.caption2)
-            .foregroundStyle(message.color)
-            .lineLimit(2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(message.color.opacity(0.10), in: RoundedRectangle(cornerRadius: 9))
+        HStack(spacing: 8) {
+            Label(message.text, systemImage: message.systemImage)
+                .font(.caption2)
+                .foregroundStyle(message.color)
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if message.showsRetry {
+                Button("Retry") {
+                    player.retry()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Try playing Code Radio again")
+                .accessibilityLabel("Retry Code Radio playback")
+                .accessibilityHint("Starts a new playback recovery attempt")
+                .accessibilityIdentifier("playback-retry")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(message.color.opacity(0.10), in: RoundedRectangle(cornerRadius: 9))
+    }
+
+    private func color(for tone: PlaybackStatusTone) -> Color {
+        switch tone {
+        case .informational:
+            return .secondary
+        case .warning:
+            return .orange
+        case .error:
+            return .red
+        }
     }
 
     private func elapsedTime(at date: Date) -> TimeInterval {
@@ -462,9 +549,12 @@ struct PlayerPopoverView: View {
     }
 }
 
-private struct StatusMessage {
+private struct StatusMessage: Identifiable {
+    let id: String
     let text: String
+    let systemImage: String
     let color: Color
+    let showsRetry: Bool
 }
 
 #Preview {
