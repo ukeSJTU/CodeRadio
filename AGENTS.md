@@ -39,6 +39,9 @@ the primary installation method.
   - `@MainActor` observable playback model.
   - Owns `AVPlayer`, metadata refresh, user defaults, remote media commands,
     fallback behavior, and system now-playing information.
+- `CodeRadio/LaunchAtLoginController.swift`
+  - Wraps `SMAppService.mainApp` behind a testable service boundary.
+  - Registers, unregisters, and reports approval state for Launch at Login.
 - `CodeRadio/CodeRadioModels.swift`
   - API response and stream quality models.
 - `CodeRadioTests/CodeRadioTests.swift`
@@ -134,7 +137,7 @@ The application target should remain configured with:
 
 ### 2. Menu Bar Experience
 
-- Add Launch at Login using `SMAppService`.
+- Launch at Login using `SMAppService` is implemented in the menu bar popover.
 - Add a small Settings window for launch behavior, preferred quality, default
   volume, and optional automatic resume.
 - Add keyboard shortcuts and improve VoiceOver descriptions.

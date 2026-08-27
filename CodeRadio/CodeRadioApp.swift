@@ -10,10 +10,14 @@ import SwiftUI
 @main
 struct CodeRadioApp: App {
     @State private var player = CodeRadioPlayer()
+    @State private var launchAtLogin = LaunchAtLoginController()
 
     var body: some Scene {
         MenuBarExtra {
-            PlayerPopoverView(player: player)
+            PlayerPopoverView(
+                player: player,
+                launchAtLogin: launchAtLogin
+            )
         } label: {
             Label(
                 "Code Radio",

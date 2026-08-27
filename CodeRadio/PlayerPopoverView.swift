@@ -3,6 +3,7 @@ import SwiftUI
 
 struct PlayerPopoverView: View {
     @Bindable var player: CodeRadioPlayer
+    @Bindable var launchAtLogin: LaunchAtLoginController
 
     var body: some View {
         VStack(spacing: 0) {
@@ -12,10 +13,15 @@ struct PlayerPopoverView: View {
             Divider()
             recentSongsSection
             Divider()
+            launchAtLoginSection
+            Divider()
             footer
         }
         .frame(width: 360)
         .background(.regularMaterial)
+        .onAppear {
+            launchAtLogin.refresh()
+        }
     }
 
     private var nowPlayingSection: some View {
@@ -191,8 +197,54 @@ struct PlayerPopoverView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 11)
     }
+
+    private var launchAtLoginSection: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Toggle(isOn: launchAtLoginBinding) {
+                Label("Launch at Login", systemImage: "power")
+            }
+            .toggleStyle(.switch)
+            .disabled(!launchAtLogin.isAvailable)
+
+            if launchAtLogin.requiresApproval {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Label(
+                        "Approval required in System Settings",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+
+                    Spacer(minLength: 4)
+
+                    Button("Open Settings") {
+                        launchAtLogin.openSystemSettings()
+                    }
+                    .controlSize(.small)
+                }
+            }
+
+            if let errorMessage = launchAtLogin.errorMessage {
+                Label(errorMessage, systemImage: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { launchAtLogin.isRequested },
+            set: { launchAtLogin.setEnabled($0) }
+        )
+    }
 }
 
 #Preview {
-    PlayerPopoverView(player: CodeRadioPlayer())
+    PlayerPopoverView(
+        player: CodeRadioPlayer(),
+        launchAtLogin: LaunchAtLoginController()
+    )
 }

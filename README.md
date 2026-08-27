@@ -1,0 +1,127 @@
+# CodeRadio
+
+A small, native macOS menu bar client for
+[freeCodeCamp Code Radio](https://coderadio.freecodecamp.org/).
+
+CodeRadio is built with SwiftUI and AVFoundation. It plays the official audio
+stream directly and does not wrap the website in a web view.
+
+> CodeRadio is an early-stage, unofficial community client and is not
+> affiliated with or endorsed by freeCodeCamp.
+
+## Features
+
+- Lives in the macOS menu bar without a Dock icon.
+- Shows the current song, artist, album artwork, listener count, and recent
+  tracks.
+- Provides play/stop and volume controls.
+- Switches between the official 128 kbps and 64 kbps MP3 streams.
+- Refreshes station metadata automatically.
+- Integrates with macOS media controls and Now Playing.
+- Optionally launches when you log in using the native macOS login-item API.
+- Runs inside App Sandbox with outgoing network access only.
+
+## Requirements
+
+- macOS 14 Sonoma or later.
+- Xcode 16 or later when building from source.
+
+## Install
+
+Prebuilt GitHub Releases and a Homebrew Cask are planned but are not available
+yet. For now, build the app from source.
+
+```sh
+git clone https://github.com/ukeSJTU/CodeRadio.git
+cd CodeRadio
+open CodeRadio.xcodeproj
+```
+
+In Xcode:
+
+1. Select the `CodeRadio` scheme.
+2. Select `My Mac` as the destination.
+3. Press Command-R.
+4. Find the radio icon on the right side of the macOS menu bar.
+
+The app intentionally does not open a normal window or appear in the Dock.
+
+## Usage
+
+Click the menu bar icon to open the player. From the popover you can:
+
+- Start or stop the stream.
+- Change the volume and stream quality.
+- View current and recently played tracks.
+- Refresh metadata or open the official Code Radio website.
+- Enable **Launch at Login**.
+- Quit the application.
+
+If macOS requires approval for Launch at Login, CodeRadio displays an
+**Open Settings** button that takes you to **System Settings → General → Login
+Items & Extensions**.
+
+When running from Xcode, the login item points to the development build in
+DerivedData. Use this only for testing and disable it before deleting
+DerivedData. Installed release builds should live in `/Applications`.
+
+## Build and Test from the Command Line
+
+```sh
+xcodebuild build \
+  -project CodeRadio.xcodeproj \
+  -scheme CodeRadio \
+  -configuration Debug \
+  -destination 'platform=macOS'
+
+xcodebuild test \
+  -project CodeRadio.xcodeproj \
+  -scheme CodeRadio \
+  -configuration Debug \
+  -destination 'platform=macOS' \
+  -only-testing:CodeRadioTests \
+  CODE_SIGNING_ALLOWED=NO
+```
+
+## Project Structure
+
+```text
+CodeRadio/
+├── CodeRadioApp.swift
+├── CodeRadioModels.swift
+├── CodeRadioPlayer.swift
+├── LaunchAtLoginController.swift
+└── PlayerPopoverView.swift
+```
+
+- `CodeRadioApp` creates the shared models and menu bar scene.
+- `CodeRadioPlayer` owns streaming, metadata, preferences, and media controls.
+- `LaunchAtLoginController` manages the native macOS login item.
+- `PlayerPopoverView` renders the menu bar player.
+
+Development conventions and the full roadmap are documented in
+[AGENTS.md](AGENTS.md).
+
+## Privacy
+
+CodeRadio does not require an account and does not include analytics. It makes
+network requests only to the official Code Radio website, metadata endpoint,
+audio streams, and artwork URLs supplied by that metadata.
+
+The app requests no file, microphone, camera, contacts, location, or other
+personal-data permissions.
+
+## Roadmap
+
+- Improve buffering, retry, and offline-state handling.
+- Add a dedicated Settings window.
+- Add polished application and menu bar icons.
+- Add localization and broader automated test coverage.
+- Publish signed and notarized GitHub Releases.
+- Distribute through a Homebrew Cask.
+
+## Contributing
+
+Issues and pull requests are welcome. Before submitting a change, make sure the
+project builds, unit tests pass, and menu bar or playback changes receive a
+short manual smoke test.
