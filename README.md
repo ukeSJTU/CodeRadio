@@ -14,7 +14,9 @@ stream directly and does not wrap the website in a web view.
 - Lives in the macOS menu bar without a Dock icon.
 - Shows the current song, artist, album artwork, listener count, and recent
   tracks.
-- Provides play/stop and volume controls.
+- Uses a compact Native Pocket layout with play/stop and step volume controls.
+- Uses native Liquid Glass controls on macOS 26 and a system-material fallback
+  on macOS 14 and 15.
 - Switches between the official 128 kbps and 64 kbps MP3 streams.
 - Refreshes station metadata automatically.
 - Integrates with macOS media controls and Now Playing.
@@ -24,7 +26,7 @@ stream directly and does not wrap the website in a web view.
 ## Requirements
 
 - macOS 14 Sonoma or later.
-- Xcode 16 or later when building from source.
+- Xcode 26 or later when building from source.
 
 ## Install
 
@@ -48,18 +50,22 @@ The app intentionally does not open a normal window or appear in the Dock.
 
 ## Usage
 
-Click the menu bar icon to open the player. From the popover you can:
+Click the menu bar icon to open the player. The compact player contains the
+current track, progress, playback, volume, and a collapsed recent-tracks list.
+Use the ellipsis button in the top-right corner for secondary options.
 
-- Start or stop the stream.
-- Change the volume and stream quality.
-- View current and recently played tracks.
-- Refresh metadata or open the official Code Radio website.
-- Enable **Launch at Login**.
+From the popover you can:
+
+- Start or stop the stream and change the volume from the control island.
+- Expand **Recently played** to see the previous three tracks.
+- Change stream quality from the ellipsis menu.
+- Refresh metadata or open the official Code Radio website from that menu.
+- Enable **Launch at Login** from that menu.
 - Quit the application.
 
-If macOS requires approval for Launch at Login, CodeRadio displays an
-**Open Settings** button that takes you to **System Settings → General → Login
-Items & Extensions**.
+If macOS requires approval for Launch at Login, the ellipsis menu adds an
+**Approve in System Settings…** action that opens **System Settings → General →
+Login Items & Extensions**.
 
 When running from Xcode, the login item points to the development build in
 DerivedData. Use this only for testing and disable it before deleting

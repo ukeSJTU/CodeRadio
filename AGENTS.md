@@ -32,9 +32,13 @@ the primary installation method.
   - Owns the shared `CodeRadioPlayer` instance.
   - Presents a window-style `MenuBarExtra`.
 - `CodeRadio/PlayerPopoverView.swift`
-  - Menu bar popover UI.
-  - Shows metadata, artwork, listeners, playback controls, stream quality,
-    recent songs, refresh, website, and quit actions.
+  - Compact 320-point Native Pocket menu bar popover UI.
+  - Shows artwork, live status, track progress, a Liquid Glass control island,
+    and collapsible recent songs.
+  - Keeps quality, Launch at Login, refresh, website, and quit actions in a
+    secondary system menu.
+  - Uses native Liquid Glass on macOS 26 with a material fallback on macOS 14
+    and 15. Building therefore requires Xcode 26 or later.
 - `CodeRadio/CodeRadioPlayer.swift`
   - `@MainActor` observable playback model.
   - Owns `AVPlayer`, metadata refresh, user defaults, remote media commands,
@@ -138,6 +142,7 @@ The application target should remain configured with:
 ### 2. Menu Bar Experience
 
 - Launch at Login using `SMAppService` is implemented in the menu bar popover.
+- The compact Native Pocket layout and secondary options menu are implemented.
 - Add a small Settings window for launch behavior, preferred quality, default
   volume, and optional automatic resume.
 - Add keyboard shortcuts and improve VoiceOver descriptions.
