@@ -85,3 +85,19 @@ to be checked outside automated CI.
 A change is done when the supported target builds, relevant automated tests pass,
 the intended menu-bar lifecycle and sandbox boundary remain intact, required
 manual checks are reported, and affected product or user documentation is current.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues using the `gh` CLI. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage uses the default five-label vocabulary. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository. See `docs/agents/domain.md`.
