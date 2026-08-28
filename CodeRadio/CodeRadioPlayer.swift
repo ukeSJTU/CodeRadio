@@ -6,21 +6,53 @@ import OSLog
 @MainActor
 @Observable
 final class CodeRadioPlayer {
-    private static let metadataURL = URL(
-        string: "https://coderadio-admin-v2.freecodecamp.org/api/nowplaying_static/coderadio.json"
-    )!
-
     private static let websiteURL = URL(string: "https://coderadio.freecodecamp.org/")!
     private static let volumeKey = "CodeRadio.volume"
 
     var isRefreshing = false
-    var stationIsOnline = true
-    var listenerCount = 0
+    var stationIsOnline: Bool?
+    var listenerCount: Int?
     var currentSong: Song?
     var songHistory: [Song] = []
-    var playedAt: Date?
-    var songDuration: TimeInterval = 0
-    var metadataErrorMessage: String?
+    private(set) var metadataState = StationMetadataState.idle
+    private var songTiming: SongTiming?
+
+    var playedAt: Date? {
+        songTiming?.playedAt
+    }
+
+    var songDuration: TimeInterval? {
+        songTiming?.duration
+    }
+
+    var metadataErrorMessage: String? {
+        switch metadataState {
+        case .idle, .fresh:
+            return nil
+        case .stale:
+            return String(localized: "Station information may be out of date")
+        case .unavailable:
+            return String(localized: "Unable to load station information")
+        }
+    }
+
+    var metadataIsStale: Bool {
+        metadataState == .stale
+    }
+
+    var hasSongProgress: Bool {
+        playedAt != nil && songDuration != nil
+    }
+
+    var stationStatusText: String {
+        guard stationIsOnline != false else {
+            return String(localized: "Offline")
+        }
+        guard let listenerCount else {
+            return String(localized: "Live")
+        }
+        return String(localized: "Live · \(listenerCount.formatted())")
+    }
 
     var volume: Double {
         didSet {
@@ -44,6 +76,7 @@ final class CodeRadioPlayer {
     }
 
     @ObservationIgnored private let playback: PlaybackCoordinator
+    @ObservationIgnored private let metadataClient: StationMetadataClient
     @ObservationIgnored private var metadataTask: Task<Void, Never>?
     @ObservationIgnored private var remoteCommandTargets: [(MPRemoteCommand, Any)] = []
     @ObservationIgnored private var announceRecoveryAfterRetry = false
@@ -61,11 +94,20 @@ final class CodeRadioPlayer {
             sleepWake: WorkspaceSleepWakeSource(),
             preferences: UserDefaultsPlaybackPreferences()
         )
-        self.init(playback: coordinator)
+        self.init(
+            playback: coordinator,
+            metadataClient: .live(),
+            startsMetadataUpdates: true
+        )
     }
 
-    init(playback: PlaybackCoordinator) {
+    init(
+        playback: PlaybackCoordinator,
+        metadataClient: StationMetadataClient,
+        startsMetadataUpdates: Bool
+    ) {
         self.playback = playback
+        self.metadataClient = metadataClient
         let savedVolume = UserDefaults.standard.object(forKey: Self.volumeKey) as? Double
         volume = savedVolume ?? 0.5
 
@@ -75,11 +117,13 @@ final class CodeRadioPlayer {
         }
         configureRemoteCommands()
         updateSystemNowPlaying()
-        startMetadataUpdates()
+        if startsMetadataUpdates {
+            startMetadataUpdates()
+        }
     }
 
     var progress: Double {
-        guard let playedAt, songDuration > 0 else { return 0 }
+        guard let playedAt, let songDuration else { return 0 }
         return min(max(Date().timeIntervalSince(playedAt) / songDuration, 0), 1)
     }
 
@@ -130,33 +174,46 @@ final class CodeRadioPlayer {
         defer { isRefreshing = false }
 
         do {
-            var request = URLRequest(url: Self.metadataURL)
-            request.timeoutInterval = 10
-            request.cachePolicy = .reloadIgnoringLocalCacheData
-
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200..<300).contains(httpResponse.statusCode)
-            else {
-                throw URLError(.badServerResponse)
-            }
-
-            let payload = try JSONDecoder.codeRadio.decode(CodeRadioResponse.self, from: data)
-            playback.updateMounts(payload.station.mounts)
+            let payload = try await metadataClient.load()
+            playback.updateMounts(payload.station?.mounts ?? [])
             stationIsOnline = payload.isOnline
-            listenerCount = payload.listeners.current
-            currentSong = payload.nowPlaying.song
-            playedAt = Date(timeIntervalSince1970: payload.nowPlaying.playedAt)
-            songDuration = payload.nowPlaying.duration
-            songHistory = payload.songHistory.map(\.song)
-            metadataErrorMessage = nil
+            listenerCount = payload.listeners?.current
+            songHistory = payload.songHistory?.compactMap(\.song) ?? []
+
+            if let song = payload.nowPlaying?.song {
+                currentSong = song
+                if let playedAt = payload.nowPlaying?.playedAt,
+                   let duration = payload.nowPlaying?.duration
+                {
+                    songTiming = SongTiming(
+                        playedAt: Date(timeIntervalSince1970: playedAt),
+                        duration: duration
+                    )
+                } else {
+                    songTiming = nil
+                }
+                metadataState = .fresh
+            } else {
+                markCurrentSongUnavailable()
+            }
             updateSystemNowPlaying()
+        } catch is CancellationError {
+            return
+        } catch let error as URLError where error.code == .cancelled {
+            return
         } catch {
             logger.error("Metadata refresh failed: \(error.localizedDescription, privacy: .public)")
-            if currentSong == nil {
-                metadataErrorMessage = String(localized: "Unable to load station information")
-            }
+            playback.updateMounts([])
+            stationIsOnline = nil
+            listenerCount = nil
+            songHistory = []
+            markCurrentSongUnavailable()
         }
+    }
+
+    private func markCurrentSongUnavailable() {
+        songTiming = nil
+        metadataState = currentSong == nil ? .unavailable : .stale
     }
 
     private func startMetadataUpdates() {
@@ -310,4 +367,9 @@ final class CodeRadioPlayer {
             command.removeTarget(target)
         }
     }
+}
+
+private nonisolated struct SongTiming: Sendable {
+    let playedAt: Date
+    let duration: TimeInterval
 }

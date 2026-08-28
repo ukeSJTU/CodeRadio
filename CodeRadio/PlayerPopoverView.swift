@@ -42,8 +42,10 @@ struct PlayerPopoverView: View {
             songDetails
                 .padding(.top, 16)
 
-            progressSection
-                .padding(.top, 12)
+            if player.hasSongProgress {
+                progressSection
+                    .padding(.top, 12)
+            }
 
             controlsSection
                 .padding(.top, 14)
@@ -126,10 +128,10 @@ struct PlayerPopoverView: View {
     private var liveBadge: some View {
         let label = HStack(spacing: 5) {
             Circle()
-                .fill(player.stationIsOnline ? .green : .red)
+                .fill(player.stationIsOnline == false ? .red : .green)
                 .frame(width: 6, height: 6)
 
-            Text(liveBadgeText)
+            Text(player.stationStatusText)
                 .font(.caption2.weight(.medium))
                 .monospacedDigit()
         }
@@ -155,12 +157,6 @@ struct PlayerPopoverView: View {
         }
     }
 
-    private var liveBadgeText: String {
-        guard player.stationIsOnline else { return "Offline" }
-        guard player.listenerCount > 0 else { return "Live" }
-        return "Live · \(player.listenerCount.formatted())"
-    }
-
     private var songDetails: some View {
         VStack(spacing: 4) {
             Text(player.currentSong?.title ?? "Code Radio")
@@ -181,7 +177,7 @@ struct PlayerPopoverView: View {
     private var progressSection: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let elapsed = elapsedTime(at: context.date)
-            let remaining = max(player.songDuration - elapsed, 0)
+            let remaining = max((player.songDuration ?? 0) - elapsed, 0)
 
             VStack(spacing: 5) {
                 ProgressView(value: progress(at: context.date))
@@ -534,13 +530,13 @@ struct PlayerPopoverView: View {
     }
 
     private func elapsedTime(at date: Date) -> TimeInterval {
-        guard let playedAt = player.playedAt, player.songDuration > 0 else { return 0 }
-        return min(max(date.timeIntervalSince(playedAt), 0), player.songDuration)
+        guard let playedAt = player.playedAt, let duration = player.songDuration else { return 0 }
+        return min(max(date.timeIntervalSince(playedAt), 0), duration)
     }
 
     private func progress(at date: Date) -> Double {
-        guard player.songDuration > 0 else { return 0 }
-        return elapsedTime(at: date) / player.songDuration
+        guard let duration = player.songDuration else { return 0 }
+        return elapsedTime(at: date) / duration
     }
 
     private func timeLabel(_ interval: TimeInterval) -> String {
